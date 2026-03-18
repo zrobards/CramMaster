@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyForge - Free Adaptive Learning</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-inner">
+        <h1 class="logo" id="logo-home" style="cursor:pointer;" title="Back to home">StudyForge</h1>
+        <div class="header-actions">
+          <button id="btn-audio-toggle" class="icon-btn" title="Toggle audio">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+          </button>
+          <button id="btn-theme-toggle" class="icon-btn" title="Toggle theme">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Import Screen -->
+    <section id="screen-import" class="screen active">
+      <div class="import-container">
+        <div class="import-hero">
+          <h2>Start Studying</h2>
+          <p>Import a Quizlet set or paste your own terms to begin an adaptive learning session.</p>
+        </div>
+
+        <div class="import-tabs">
+          <button class="tab-btn active" data-tab="url">Import from Quizlet</button>
+          <button class="tab-btn" data-tab="manual">Paste Terms</button>
+        </div>
+
+        <div id="tab-url" class="tab-content active">
+          <div class="input-group">
+            <input type="url" id="quizlet-url" placeholder="https://quizlet.com/123456789/set-name-flash-cards/" autocomplete="off">
+            <button id="btn-import" class="btn-primary">Import</button>
+          </div>
+          <div id="import-status" class="status-msg"></div>
+        </div>
+
+        <div id="tab-manual" class="tab-content">
+          <textarea id="manual-terms" placeholder="Enter terms and definitions, one pair per line, separated by a colon (:), double colon (::), or tab&#10;&#10;Example:&#10;McCulloch v. Maryland (1819): Established the supremacy of federal laws over state laws.&#10;Tinker v. Des Moines (1969): Symbolic speech is protected by the First Amendment."></textarea>
+          <button id="btn-parse-manual" class="btn-primary">Load Terms</button>
+        </div>
+
+        <!-- Previously saved sets -->
+        <div id="saved-sets-section" class="saved-sets" style="display:none;">
+          <h3>Previously Studied Sets</h3>
+          <div id="saved-sets-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Set Overview Screen -->
+    <section id="screen-overview" class="screen">
+      <div class="overview-container">
+        <div class="overview-header">
+          <button id="btn-back-import" class="btn-ghost">&larr; Back</button>
+          <h2 id="set-title" class="editable-title" title="Click to rename">Set Title</h2>
+          <input type="text" id="set-title-input" class="title-edit-input" style="display:none;" />
+          <span id="set-count" class="badge">0 terms</span>
+        </div>
+
+        <!-- Quick Preview of Terms -->
+        <div class="terms-toolbar">
+          <button id="btn-add-term" class="btn-ghost btn-sm">+ Add Term</button>
+        </div>
+        <div class="terms-preview" id="terms-preview"></div>
+
+        <!-- Study Settings -->
+        <div class="study-options">
+          <h3>Study Settings</h3>
+          <div class="options-grid">
+            <div class="option-card">
+              <label>Study Direction</label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" name="direction" value="def-to-term" checked> Definition &rarr; Term
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="direction" value="term-to-def"> Term &rarr; Definition
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="direction" value="both"> Both (random)
+                </label>
+              </div>
+            </div>
+            <div class="option-card">
+              <label>How it works</label>
+              <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.35rem;"><strong>Phase 1:</strong> Multiple choice — get each term right once to advance.</p>
+              <p style="font-size:0.85rem;color:var(--text-muted);"><strong>Phase 2:</strong> Written — type the answer. Wrong answers are re-asked.</p>
+            </div>
+            <div class="option-card">
+              <label>Audio</label>
+              <div class="checkbox-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="opt-audio"> Read questions aloud
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-start-learn" class="btn-primary btn-lg">Start Learning</button>
+      </div>
+    </section>
+
+    <!-- Learn Session Screen -->
+    <section id="screen-learn" class="screen">
+      <div class="learn-container">
+        <!-- Progress Bar -->
+        <div class="progress-section">
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <div class="progress-stats">
+            <span class="stat">
+              <span class="stat-dot mastered"></span>
+              Mastered: <strong id="stat-mastered">0</strong>
+            </span>
+            <span class="stat">
+              <span class="stat-dot learning"></span>
+              Learning: <strong id="stat-learning">0</strong>
+            </span>
+            <span class="stat">
+              <span class="stat-dot remaining"></span>
+              Remaining: <strong id="stat-remaining">0</strong>
+            </span>
+          </div>
+        </div>
+
+        <!-- Question Area -->
+        <div id="question-area" class="question-area">
+          <div class="question-header">
+            <span id="question-type-badge" class="type-badge">Multiple Choice</span>
+            <span id="question-counter" class="question-counter">1 / 10</span>
+          </div>
+
+          <div id="question-prompt" class="question-prompt">
+            What is the definition of this term?
+          </div>
+
+          <!-- Multiple Choice -->
+          <div id="mc-options" class="mc-options" style="display:none;"></div>
+
+          <!-- True/False -->
+          <div id="tf-options" class="tf-options" style="display:none;">
+            <button class="tf-btn" data-answer="true">True</button>
+            <button class="tf-btn" data-answer="false">False</button>
+          </div>
+
+          <!-- Written Answer -->
+          <div id="written-input" class="written-input" style="display:none;">
+            <input type="text" id="written-answer" placeholder="Type your answer..." autocomplete="off">
+            <button id="btn-submit-written" class="btn-primary">Submit</button>
+          </div>
+
+          <!-- Feedback -->
+          <div id="feedback" class="feedback" style="display:none;">
+            <div id="feedback-icon" class="feedback-icon"></div>
+            <div id="feedback-text" class="feedback-text"></div>
+            <div id="feedback-correct" class="feedback-correct"></div>
+            <div class="feedback-actions">
+              <button id="btn-override" class="btn-ghost btn-sm" style="display:none;">I was correct</button>
+              <button id="btn-next" class="btn-primary">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Screen -->
+    <section id="screen-results" class="screen">
+      <div class="results-container">
+        <div class="results-hero">
+          <div id="results-icon" class="results-icon">&#127942;</div>
+          <h2 id="results-title">Great Job!</h2>
+          <p id="results-subtitle">You've completed this round of study.</p>
+        </div>
+
+        <div class="results-stats-grid">
+          <div class="result-stat">
+            <div id="result-accuracy" class="result-number">0%</div>
+            <div class="result-label">Accuracy</div>
+          </div>
+          <div class="result-stat">
+            <div id="result-mastered" class="result-number">0</div>
+            <div class="result-label">Mastered</div>
+          </div>
+          <div class="result-stat">
+            <div id="result-reviewing" class="result-number">0</div>
+            <div class="result-label">Still Learning</div>
+          </div>
+          <div class="result-stat">
+            <div id="result-streak" class="result-number">0</div>
+            <div class="result-label">Best Streak</div>
+          </div>
+        </div>
+
+        <!-- Terms breakdown -->
+        <div class="results-breakdown">
+          <h3>Term Breakdown</h3>
+          <div id="results-terms-list" class="results-terms-list"></div>
+        </div>
+
+        <div class="results-actions">
+          <button id="btn-continue-learning" class="btn-primary btn-lg">Continue Learning</button>
+          <button id="btn-restart" class="btn-ghost">Start Over</button>
+          <button id="btn-back-overview" class="btn-ghost">Back to Set</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
