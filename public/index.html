@@ -78,6 +78,20 @@
           <h3>Study Settings</h3>
           <div class="options-grid">
             <div class="option-card">
+              <label>Question Mode</label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" name="mode" value="mc"> Multiple Choice
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="mode" value="written"> Fill in the Blank
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="mode" value="both" checked> Both (randomized)
+                </label>
+              </div>
+            </div>
+            <div class="option-card">
               <label>Study Direction</label>
               <div class="radio-group">
                 <label class="radio-label">
@@ -90,11 +104,6 @@
                   <input type="radio" name="direction" value="both"> Both (random)
                 </label>
               </div>
-            </div>
-            <div class="option-card">
-              <label>How it works</label>
-              <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.35rem;"><strong>Phase 1:</strong> Multiple choice — get each term right once to advance.</p>
-              <p style="font-size:0.85rem;color:var(--text-muted);"><strong>Phase 2:</strong> Written — type the answer. Wrong answers are re-asked.</p>
             </div>
             <div class="option-card">
               <label>Audio</label>

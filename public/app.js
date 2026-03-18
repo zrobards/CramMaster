@@ -438,36 +438,20 @@
   }
 
   // ===== LEARN SESSION =====
-  // Two-phase learn:
-  //   Phase 1 (MCQ): All terms as multiple choice in random order. Wrong answers get re-queued.
-  //   Phase 2 (Written): Given the definition, type the term. Random order. Wrong answers re-queued.
 
   function startLearnSession() {
     state.settings.audio = $('#opt-audio').checked;
     state.settings.direction = document.querySelector('input[name="direction"]:checked')?.value || 'def-to-term';
+    state.settings.mode = document.querySelector('input[name="mode"]:checked')?.value || 'both';
 
-    // Phase 1: MCQ round — all cards that aren't mastered, randomized
-    const mcqCards = state.cardState
-      .filter(c => c.bucket < BUCKET.MASTERED)
-      .map(c => c.cardIndex);
-    shuffleArray(mcqCards);
+    // Queue all cards, randomized. Wrong answers get re-queued.
+    const allCards = state.cardState.map(c => c.cardIndex);
+    shuffleArray(allCards);
 
-    // If all mastered, re-test everything in written mode
-    if (mcqCards.length === 0) {
-      const allCards = state.cardState.map(c => c.cardIndex);
-      shuffleArray(allCards);
-      state.session.phase = 'written';
-      state.session.queue = allCards;
-    } else {
-      state.session.phase = 'mcq';
-      state.session.queue = mcqCards;
-      // Track which cards have been passed in MCQ phase so we can build the written queue later
-      state.session.mcqPassed = new Set();
-    }
-
+    state.session.queue = allCards;
     state.session.currentIndex = 0;
     state.session.questionNum = 0;
-    state.session.totalQuestions = state.session.queue.length;
+    state.session.totalQuestions = allCards.length;
     state.session.correctCount = 0;
     state.session.incorrectCount = 0;
     state.session.bestStreak = 0;
@@ -475,29 +459,6 @@
     state.session.answered = false;
 
     showScreen('learn');
-    updateProgress();
-    showNextQuestion();
-  }
-
-  function startWrittenPhase() {
-    // Build written queue from cards that passed MCQ, in random order
-    const writtenCards = [...(state.session.mcqPassed || [])];
-    // Also include any cards that were already mastered before this session
-    state.cardState.forEach(c => {
-      if (c.bucket >= BUCKET.MASTERED && !writtenCards.includes(c.cardIndex)) {
-        writtenCards.push(c.cardIndex);
-      }
-    });
-    shuffleArray(writtenCards);
-
-    state.session.phase = 'written';
-    state.session.queue = writtenCards;
-    state.session.currentIndex = 0;
-    state.session.questionNum = 0;
-    state.session.totalQuestions = writtenCards.length;
-    // Keep cumulative stats from MCQ phase
-    state.session.answered = false;
-
     updateProgress();
     showNextQuestion();
   }
@@ -512,35 +473,18 @@
     $('#stat-learning').textContent = learning;
     $('#stat-remaining').textContent = remaining;
 
-    // Progress bar: in MCQ phase show MCQ progress, in written phase show overall
-    const phase = state.session.phase;
-    if (phase === 'mcq') {
-      const done = state.session.currentIndex;
-      const total = state.session.queue.length;
-      const pct = total > 0 ? (done / total) * 50 : 0; // MCQ is first 50%
-      $('#progress-fill').style.width = `${pct}%`;
-    } else {
-      const done = state.session.currentIndex;
-      const total = state.session.queue.length;
-      const pct = total > 0 ? 50 + (done / total) * 50 : 100; // Written is second 50%
-      $('#progress-fill').style.width = `${pct}%`;
-    }
+    const done = state.session.currentIndex;
+    const queueLen = state.session.queue.length;
+    const pct = queueLen > 0 ? (done / queueLen) * 100 : 0;
+    $('#progress-fill').style.width = `${pct}%`;
   }
 
   function showNextQuestion() {
     const session = state.session;
 
     if (session.currentIndex >= session.queue.length) {
-      // End of current phase
-      if (session.phase === 'mcq') {
-        // Transition to written phase
-        startWrittenPhase();
-        return;
-      } else {
-        // Done with both phases
-        showResults();
-        return;
-      }
+      showResults();
+      return;
     }
 
     session.questionNum++;
@@ -548,7 +492,6 @@
 
     const cardIdx = session.queue[session.currentIndex];
     const card = state.cards[cardIdx];
-    const cs = state.cardState[cardIdx];
 
     // Hide all question types and feedback
     $('#mc-options').style.display = 'none';
@@ -557,16 +500,15 @@
     $('#feedback').style.display = 'none';
 
     // Determine direction for this question
-    let questionText, answer, promptLabel;
+    let questionText, answer;
     const dir = state.settings.direction;
-    let showingTerm; // true if question shows the term, false if showing definition
+    let showingTerm;
 
     if (dir === 'both') {
       showingTerm = Math.random() < 0.5;
     } else if (dir === 'term-to-def') {
       showingTerm = true;
     } else {
-      // def-to-term (default)
       showingTerm = false;
     }
 
@@ -578,22 +520,31 @@
       answer = card.term;
     }
 
-    // Store which side we're showing so distractors pull from the right pool
     state.session.currentShowingTerm = showingTerm;
 
     $('#question-counter').textContent = `${session.currentIndex + 1} / ${session.queue.length}`;
 
-    if (session.phase === 'mcq') {
-      promptLabel = showingTerm ? 'Select the correct definition' : 'Select the correct term';
-      $('#question-type-badge').textContent = 'Phase 1: Multiple Choice';
+    // Pick question type based on mode setting
+    const mode = state.settings.mode;
+    let qType;
+    if (mode === 'mc') {
+      qType = 'mc';
+    } else if (mode === 'written') {
+      qType = 'written';
+    } else {
+      // both — randomize
+      qType = Math.random() < 0.5 ? 'mc' : 'written';
+    }
 
+    let promptLabel;
+    if (qType === 'mc') {
+      promptLabel = showingTerm ? 'Select the correct definition' : 'Select the correct term';
+      $('#question-type-badge').textContent = 'Multiple Choice';
       if (state.settings.audio) speak(questionText);
       showMultipleChoice(questionText, answer, cardIdx, promptLabel);
-
     } else {
       promptLabel = showingTerm ? 'Type the definition' : 'Type the term';
-      $('#question-type-badge').textContent = 'Phase 2: Written';
-
+      $('#question-type-badge').textContent = 'Fill in the Blank';
       if (state.settings.audio) speak(questionText);
       showWritten(questionText, answer, cardIdx, promptLabel);
     }
@@ -876,10 +827,6 @@
         cs.nextReview = Date.now() + (cs.correctStreak * 30000);
       }
 
-      // Track MCQ pass for phase transition
-      if (state.session.phase === 'mcq' && state.session.mcqPassed) {
-        state.session.mcqPassed.add(cardIdx);
-      }
     } else {
       state.session.incorrectCount++;
       state.session.currentStreak = 0;
