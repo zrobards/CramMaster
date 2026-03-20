@@ -1,12 +1,9 @@
 {
+  "framework": null,
+  "outputDirectory": "public",
   "functions": {
     "api/scrape.js": {
-      "memory": 1024,
       "maxDuration": 30
     }
-  },
-  "rewrites": [
-    { "source": "/api/scrape", "destination": "/api/scrape" },
-    { "source": "/(.*)", "destination": "/public/$1" }
-  ]
+  }
 }
