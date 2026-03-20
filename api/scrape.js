@@ -1,4 +1,6 @@
-const puppeteer = require('puppeteer-core');
+const puppeteerExtra = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteerExtra.use(StealthPlugin());
 
 let browser = null;
 
@@ -8,15 +10,15 @@ async function getBrowser() {
   if (process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL) {
     // Serverless environment (Vercel)
     const chromium = require('@sparticuz/chromium');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
+    chromium.setGraphicsMode = false;
+    browser = await puppeteerExtra.launch({
+      args: [...chromium.args, '--disable-blink-features=AutomationControlled'],
+      defaultViewport: { width: 1280, height: 900 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
   } else {
     // Local development - use locally installed Chrome
-    const os = require('os');
     const fs = require('fs');
     const possiblePaths = [
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -28,7 +30,7 @@ async function getBrowser() {
     const execPath = possiblePaths.find((p) => fs.existsSync(p));
     if (!execPath) throw new Error('Chrome not found locally. Install Google Chrome.');
 
-    browser = await puppeteer.launch({
+    browser = await puppeteerExtra.launch({
       headless: 'new',
       executablePath: execPath,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
