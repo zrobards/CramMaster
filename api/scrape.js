@@ -1,24 +1,58 @@
-const puppeteerExtra = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteerExtra.use(StealthPlugin());
+const puppeteer = require('puppeteer-core');
 
 let browser = null;
+
+// Stealth patches applied to each page (replaces puppeteer-extra-plugin-stealth
+// which doesn't bundle correctly in Vercel's serverless environment)
+async function applyStealthPatches(page) {
+  await page.evaluateOnNewDocument(() => {
+    // Hide webdriver flag
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+    // Override chrome runtime to look like a real browser
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {} };
+
+    // Fix permissions API
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (params) =>
+      params.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : origQuery(params);
+
+    // Fix plugins to look non-empty
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5],
+    });
+
+    // Fix languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+
+    // Remove headless indicators from user agent
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+
+    // Fix iframe contentWindow access
+    const origAttachShadow = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function () {
+      return origAttachShadow.apply(this, [{ mode: 'open' }]);
+    };
+  });
+}
 
 async function getBrowser() {
   if (browser && browser.connected) return browser;
 
   if (process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL) {
-    // Serverless environment (Vercel)
     const chromium = require('@sparticuz/chromium');
     chromium.setGraphicsMode = false;
-    browser = await puppeteerExtra.launch({
+    browser = await puppeteer.launch({
       args: [...chromium.args, '--disable-blink-features=AutomationControlled'],
       defaultViewport: { width: 1280, height: 900 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
   } else {
-    // Local development - use locally installed Chrome
     const fs = require('fs');
     const possiblePaths = [
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -30,7 +64,7 @@ async function getBrowser() {
     const execPath = possiblePaths.find((p) => fs.existsSync(p));
     if (!execPath) throw new Error('Chrome not found locally. Install Google Chrome.');
 
-    browser = await puppeteerExtra.launch({
+    browser = await puppeteer.launch({
       headless: 'new',
       executablePath: execPath,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
@@ -64,9 +98,8 @@ module.exports = async function handler(req, res) {
     const b = await getBrowser();
     page = await b.newPage();
 
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    });
+    // Apply stealth patches before navigating
+    await applyStealthPatches(page);
 
     await page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
@@ -76,11 +109,17 @@ module.exports = async function handler(req, res) {
 
     await page.goto(cleanUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 30000,
+      timeout: 25000,
     });
 
-    // Wait for JS to render
-    await new Promise((r) => setTimeout(r, 4000));
+    // Wait for JS to render and for any Cloudflare challenge to resolve
+    await new Promise((r) => setTimeout(r, 5000));
+
+    // If Cloudflare challenge page, wait longer for it to resolve
+    const pageTitle = await page.title();
+    if (pageTitle.includes('Just a moment') || pageTitle.includes('Attention Required')) {
+      await new Promise((r) => setTimeout(r, 8000));
+    }
 
     const result = await page.evaluate(() => {
       let title = '';
