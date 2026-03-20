@@ -1,13 +1,20 @@
 {
-  "framework": null,
-  "functions": {
-    "api/scrape.js": {
-      "maxDuration": 30
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/scrape.js",
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 30
+      }
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
     }
-  },
-  "rewrites": [
-    { "source": "/", "destination": "/public/index.html" },
-    { "source": "/app.js", "destination": "/public/app.js" },
-    { "source": "/styles.css", "destination": "/public/styles.css" }
+  ],
+  "routes": [
+    { "src": "/api/scrape", "dest": "/api/scrape.js" },
+    { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }
