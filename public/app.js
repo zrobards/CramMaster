@@ -149,6 +149,12 @@
     loadSavedSets();
   }
 
+  // Endpoints to try in order: local server first, then Cloudflare Worker fallback
+  const SCRAPE_ENDPOINTS = [
+    '/api/scrape',
+    'https://quizlet-scraper.zacharyrobards.workers.dev',
+  ];
+
   async function importFromUrl() {
     const url = $('#quizlet-url').value.trim();
     const status = $('#import-status');
@@ -161,38 +167,52 @@
     }
 
     btn.disabled = true;
-    status.innerHTML = '<span class="spinner"></span>Fetching flashcards...';
+    status.innerHTML = '<span class="spinner"></span>Fetching flashcards... this may take a few seconds';
     status.className = 'status-msg loading';
 
-    try {
-      const res = await fetch('/api/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
+    let lastError = '';
 
-      const data = await res.json();
+    for (const endpoint of SCRAPE_ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to import');
+        const data = await res.json();
+
+        if (res.ok && data.cards && data.cards.length > 0) {
+          state.cards = data.cards;
+          state.setTitle = data.title || 'Imported Set';
+          state.cardState = initCardState(data.cards);
+
+          status.textContent = `Loaded ${data.count} terms!`;
+          status.className = 'status-msg success';
+
+          saveSet();
+          setTimeout(() => showOverview(), 500);
+          btn.disabled = false;
+          return;
+        }
+
+        lastError = data.error || 'No cards found';
+      } catch (err) {
+        lastError = err.message;
       }
-
-      state.cards = data.cards;
-      state.setTitle = data.title || 'Imported Set';
-      state.cardState = initCardState(data.cards);
-
-      status.textContent = `Loaded ${data.count} terms!`;
-      status.className = 'status-msg success';
-
-      saveSet();
-      setTimeout(() => showOverview(), 500);
-
-    } catch (err) {
-      status.textContent = err.message;
-      status.className = 'status-msg error';
-    } finally {
-      btn.disabled = false;
     }
+
+    // All endpoints failed — show helpful export instructions
+    status.innerHTML = `
+      <strong>Could not auto-import this set.</strong> Quizlet blocks automated access.<br><br>
+      <strong>Quick workaround:</strong><br>
+      1. Open your Quizlet set<br>
+      2. Click the <strong>⋯</strong> menu → <strong>Export</strong><br>
+      3. Copy all the text<br>
+      4. Switch to the <strong>"Paste Terms"</strong> tab here and paste it
+    `;
+    status.className = 'status-msg error';
+    btn.disabled = false;
   }
 
   function importManual() {
