@@ -149,12 +149,6 @@
     loadSavedSets();
   }
 
-  // Endpoints to try in order: local server first, then Cloudflare Worker fallback
-  const SCRAPE_ENDPOINTS = [
-    '/api/scrape',
-    'https://quizlet-scraper.zacharyrobards.workers.dev',
-  ];
-
   async function importFromUrl() {
     const url = $('#quizlet-url').value.trim();
     const status = $('#import-status');
@@ -167,52 +161,38 @@
     }
 
     btn.disabled = true;
-    status.innerHTML = '<span class="spinner"></span>Fetching flashcards... this may take a few seconds';
+    status.innerHTML = '<span class="spinner"></span>Fetching flashcards...';
     status.className = 'status-msg loading';
 
-    let lastError = '';
+    try {
+      const res = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
 
-    for (const endpoint of SCRAPE_ENDPOINTS) {
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
-        });
+      const data = await res.json();
 
-        const data = await res.json();
-
-        if (res.ok && data.cards && data.cards.length > 0) {
-          state.cards = data.cards;
-          state.setTitle = data.title || 'Imported Set';
-          state.cardState = initCardState(data.cards);
-
-          status.textContent = `Loaded ${data.count} terms!`;
-          status.className = 'status-msg success';
-
-          saveSet();
-          setTimeout(() => showOverview(), 500);
-          btn.disabled = false;
-          return;
-        }
-
-        lastError = data.error || 'No cards found';
-      } catch (err) {
-        lastError = err.message;
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to import');
       }
-    }
 
-    // All endpoints failed — show helpful export instructions
-    status.innerHTML = `
-      <strong>Could not auto-import this set.</strong> Quizlet blocks automated access.<br><br>
-      <strong>Quick workaround:</strong><br>
-      1. Open your Quizlet set<br>
-      2. Click the <strong>⋯</strong> menu → <strong>Export</strong><br>
-      3. Copy all the text<br>
-      4. Switch to the <strong>"Paste Terms"</strong> tab here and paste it
-    `;
-    status.className = 'status-msg error';
-    btn.disabled = false;
+      state.cards = data.cards;
+      state.setTitle = data.title || 'Imported Set';
+      state.cardState = initCardState(data.cards);
+
+      status.textContent = `Loaded ${data.count} terms!`;
+      status.className = 'status-msg success';
+
+      saveSet();
+      setTimeout(() => showOverview(), 500);
+
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = 'status-msg error';
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function importManual() {
@@ -681,8 +661,8 @@
       if (state.session.answered) return;
       const userAnswer = input.value.trim();
       if (!userAnswer) return;
-      const correct = checkWrittenAnswer(userAnswer, correctAnswer);
-      handleWrittenAnswer(correct, correctAnswer, cardIdx);
+      const result = checkWrittenAnswer(userAnswer, correctAnswer);
+      handleWrittenAnswer(result.correct, correctAnswer, cardIdx, result.exact);
     };
 
     $('#btn-submit-written').onclick = submit;
@@ -691,6 +671,7 @@
     };
   }
 
+  // Returns { correct: bool, exact: bool }
   function checkWrittenAnswer(user, correct) {
     const normalize = (s) => s.toLowerCase().trim()
       .replace(/[^a-z0-9\s]/g, '')
@@ -700,12 +681,12 @@
     const c = normalize(correct);
 
     // Exact match after normalization
-    if (u === c) return true;
+    if (u === c) return { correct: true, exact: true };
 
     // Levenshtein fuzzy match — 25% tolerance
     const distance = levenshtein(u, c);
     const threshold = Math.max(2, Math.floor(c.length * 0.25));
-    if (distance <= threshold) return true;
+    if (distance <= threshold) return { correct: true, exact: false };
 
     // Check if user's answer contains most key words from the correct answer
     const stopWords = new Set(['the', 'a', 'an', 'is', 'was', 'are', 'were', 'of', 'in', 'to', 'and', 'or', 'that', 'for', 'it', 'on', 'by', 'with', 'as', 'at', 'from', 'this', 'be', 'has', 'had', 'not', 'but', 'its']);
@@ -725,7 +706,7 @@
         if (found) matched++;
       }
       const matchRatio = matched / correctWords.length;
-      if (matchRatio >= 0.6) return true; // 60% of key words matched
+      if (matchRatio >= 0.6) return { correct: true, exact: false }; // 60% of key words matched
     }
 
     // Check if correct answer contains most of user's key words (user might phrase it differently)
@@ -741,10 +722,10 @@
         if (found) matched++;
       }
       const matchRatio = matched / userKeyWords.length;
-      if (matchRatio >= 0.6 && userKeyWords.length >= 2) return true;
+      if (matchRatio >= 0.6 && userKeyWords.length >= 2) return { correct: true, exact: false };
     }
 
-    return false;
+    return { correct: false, exact: false };
   }
 
   function levenshtein(a, b) {
@@ -809,7 +790,7 @@
     showFeedback(correct, correctAnswer, cardIdx, false);
   }
 
-  function handleWrittenAnswer(correct, correctAnswer, cardIdx) {
+  function handleWrittenAnswer(correct, correctAnswer, cardIdx, exact) {
     state.session.answered = true;
     const input = $('#written-answer');
     input.disabled = true;
@@ -821,7 +802,7 @@
     }
 
     updateCardState(cardIdx, correct);
-    showFeedback(correct, correctAnswer, cardIdx, true);
+    showFeedback(correct, correctAnswer, cardIdx, true, exact);
   }
 
   function updateCardState(cardIdx, correct) {
@@ -870,75 +851,127 @@
     saveSet();
   }
 
-  function showFeedback(correct, correctAnswer, cardIdx, isWritten) {
+  function showFeedback(correct, correctAnswer, cardIdx, isWritten, exact) {
     const feedback = $('#feedback');
     const card = state.cards[cardIdx];
     const overrideBtn = $('#btn-override');
+    // For non-written questions, treat as exact (no fuzzy feedback needed)
+    if (!isWritten) exact = true;
 
     feedback.style.display = 'block';
     feedback.className = `feedback ${correct ? 'correct' : 'incorrect'}`;
 
-    if (correct) {
+    if (correct && exact) {
+      // Perfect match
       $('#feedback-icon').textContent = getRandomEmoji(true);
       $('#feedback-text').textContent = getRandomFeedback(true);
       $('#feedback-correct').textContent = '';
       overrideBtn.style.display = 'none';
+    } else if (correct && !exact) {
+      // Fuzzy match — accepted but not perfectly spelled
+      $('#feedback-icon').textContent = getRandomEmoji(true);
+      $('#feedback-text').textContent = 'Close enough! Correct spelling:';
+      $('#feedback-correct').innerHTML = `<strong>${escapeHtml(correctAnswer)}</strong>`;
+      // Show override button so user can mark themselves wrong
+      overrideBtn.style.display = '';
+      overrideBtn.textContent = 'I was wrong';
     } else {
       $('#feedback-icon').textContent = getRandomEmoji(false);
       $('#feedback-text').textContent = getRandomFeedback(false);
       $('#feedback-correct').innerHTML = `Correct answer: <strong>${escapeHtml(correctAnswer)}</strong>`;
       // Show override button for written questions marked wrong
       overrideBtn.style.display = isWritten ? '' : 'none';
+      overrideBtn.textContent = 'I was correct';
     }
 
-    // Override: reverse the incorrect verdict
+    // Override: reverse the verdict (wrong→correct OR fuzzy-correct→wrong)
     overrideBtn.onclick = () => {
-      // Undo the incorrect state update
       const cs = state.cardState[cardIdx];
-      state.session.incorrectCount--;
-      state.session.correctCount++;
-      state.session.currentStreak++;
-      if (state.session.currentStreak > state.session.bestStreak) {
-        state.session.bestStreak = state.session.currentStreak;
-      }
 
-      cs.incorrectCount = Math.max(0, cs.incorrectCount - 1);
-      cs.correctStreak += 2; // Restore the streak (+1 that was lost, +1 for this answer)
-      cs.easeFactor = Math.min(3.0, cs.easeFactor + 0.2); // Undo the ease penalty
+      if (correct && !exact) {
+        // Fuzzy-correct answer being marked as WRONG by user
+        state.session.correctCount--;
+        state.session.incorrectCount++;
+        state.session.currentStreak = 0;
 
-      if (cs.correctStreak >= MASTERY_STREAK) {
-        cs.bucket = BUCKET.MASTERED;
-        const interval = Math.pow(cs.easeFactor, cs.correctStreak - MASTERY_STREAK + 1) * 60000;
-        cs.nextReview = Date.now() + interval;
-      } else if (cs.correctStreak >= 1) {
-        cs.bucket = BUCKET.REVIEWING;
-        cs.nextReview = Date.now() + (cs.correctStreak * 30000);
-      }
+        cs.correctStreak = Math.max(0, cs.correctStreak - 1);
+        cs.incorrectCount++;
+        cs.bucket = BUCKET.LEARNING;
+        cs.easeFactor = Math.max(1.3, cs.easeFactor - 0.2);
+        cs.nextReview = 0;
 
-      // Remove the re-queued copy of this card from the session queue
-      const qi = state.session.queue.indexOf(cardIdx, state.session.currentIndex + 1);
-      if (qi !== -1) {
-        state.session.queue.splice(qi, 1);
+        // Re-add to queue so they see it again
+        const reinsertAt = Math.min(
+          state.session.queue.length,
+          state.session.currentIndex + 3 + Math.floor(Math.random() * 3)
+        );
+        state.session.queue.splice(reinsertAt, 0, cardIdx);
         state.session.totalQuestions = state.session.queue.length;
+
+        // Remove from mcqPassed if applicable
+        if (state.session.phase === 'mcq' && state.session.mcqPassed) {
+          state.session.mcqPassed.delete(cardIdx);
+        }
+
+        updateProgress();
+        saveSet();
+
+        // Update UI to show incorrect
+        feedback.className = 'feedback incorrect';
+        $('#feedback-icon').textContent = getRandomEmoji(false);
+        $('#feedback-text').textContent = 'Marked as incorrect — you\'ll see this again!';
+        $('#feedback-correct').innerHTML = `Correct answer: <strong>${escapeHtml(correctAnswer)}</strong>`;
+        overrideBtn.style.display = 'none';
+
+        const writtenInput = $('#written-answer');
+        writtenInput.style.borderColor = 'var(--error)';
+      } else {
+        // Incorrect answer being marked as CORRECT by user
+        state.session.incorrectCount--;
+        state.session.correctCount++;
+        state.session.currentStreak++;
+        if (state.session.currentStreak > state.session.bestStreak) {
+          state.session.bestStreak = state.session.currentStreak;
+        }
+
+        cs.incorrectCount = Math.max(0, cs.incorrectCount - 1);
+        cs.correctStreak += 2; // Restore the streak (+1 that was lost, +1 for this answer)
+        cs.easeFactor = Math.min(3.0, cs.easeFactor + 0.2); // Undo the ease penalty
+
+        if (cs.correctStreak >= MASTERY_STREAK) {
+          cs.bucket = BUCKET.MASTERED;
+          const interval = Math.pow(cs.easeFactor, cs.correctStreak - MASTERY_STREAK + 1) * 60000;
+          cs.nextReview = Date.now() + interval;
+        } else if (cs.correctStreak >= 1) {
+          cs.bucket = BUCKET.REVIEWING;
+          cs.nextReview = Date.now() + (cs.correctStreak * 30000);
+        }
+
+        // Remove the re-queued copy of this card from the session queue
+        const qi = state.session.queue.indexOf(cardIdx, state.session.currentIndex + 1);
+        if (qi !== -1) {
+          state.session.queue.splice(qi, 1);
+          state.session.totalQuestions = state.session.queue.length;
+        }
+
+        // Track as passed for phase transition
+        if (state.session.phase === 'mcq' && state.session.mcqPassed) {
+          state.session.mcqPassed.add(cardIdx);
+        }
+
+        updateProgress();
+        saveSet();
+
+        // Update UI to show correct
+        feedback.className = 'feedback correct';
+        $('#feedback-icon').textContent = getRandomEmoji(true);
+        $('#feedback-text').textContent = 'Marked as correct!';
+        $('#feedback-correct').textContent = '';
+        overrideBtn.style.display = 'none';
+
+        const writtenInput = $('#written-answer');
+        writtenInput.style.borderColor = 'var(--success)';
       }
-
-      // Track as passed for phase transition
-      if (state.session.phase === 'mcq' && state.session.mcqPassed) {
-        state.session.mcqPassed.add(cardIdx);
-      }
-
-      updateProgress();
-      saveSet();
-
-      // Update UI to show correct
-      feedback.className = 'feedback correct';
-      $('#feedback-icon').textContent = getRandomEmoji(true);
-      $('#feedback-text').textContent = 'Marked as correct!';
-      $('#feedback-correct').textContent = '';
-      overrideBtn.style.display = 'none';
-
-      const writtenInput = $('#written-answer');
-      writtenInput.style.borderColor = 'var(--success)';
     };
 
     // Speak feedback if audio on
